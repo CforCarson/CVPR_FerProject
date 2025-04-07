@@ -38,16 +38,18 @@ class DualBranchDiscriminator(nn.Module):
         
         # Real/Fake classification branch
         self.realfake_branch = nn.Sequential(
-            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=0),  # 6x6 -> 4x4
+            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),  # 6x6 -> 6x6
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=0),  # 4x4 -> 1x1
+            nn.AdaptiveAvgPool2d(1),  # Global average pooling to 1x1
+            nn.Flatten(),
+            nn.Linear(512, 1),
             nn.Sigmoid()
         )
         
         # Expression classification branch
         self.expr_branch = nn.Sequential(
-            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=0),  # 6x6 -> 4x4
+            nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1),  # 6x6 -> 6x6
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
             nn.AdaptiveAvgPool2d(1),  # Global average pooling

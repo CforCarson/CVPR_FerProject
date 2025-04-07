@@ -24,7 +24,12 @@ def train_texPGAN(train_loader, epochs=100, lr=0.0002, beta1=0.5, beta2=0.999,
     
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    print(f"Using device for GAN training: {device}")
+    
+    # Print CUDA memory information if available
+    if device.type == 'cuda':
+        print(f"Initial CUDA memory allocated: {torch.cuda.memory_allocated(0) / 1024**2:.2f} MB")
+        print(f"Initial CUDA memory reserved: {torch.cuda.memory_reserved(0) / 1024**2:.2f} MB")
     
     # Initialize models
     generator = TextureEnhancedGenerator(
@@ -34,6 +39,10 @@ def train_texPGAN(train_loader, epochs=100, lr=0.0002, beta1=0.5, beta2=0.999,
     ).to(device)
     
     discriminator = DualBranchDiscriminator().to(device)
+    
+    # Explicitly print model device placement
+    print(f"Generator device: {next(generator.parameters()).device}")
+    print(f"Discriminator device: {next(discriminator.parameters()).device}")
     
     # Setup optimizers
     optimizer_G = optim.Adam(generator.parameters(), lr=lr, betas=(beta1, beta2))
@@ -142,6 +151,10 @@ def train_texPGAN(train_loader, epochs=100, lr=0.0002, beta1=0.5, beta2=0.999,
                     gen_images[:8], 
                     save_path=os.path.join(output_dir, 'samples', f'lbp_viz_epoch_{epoch}_iter_{i}.png')
                 )
+                
+                # Print GPU memory usage if available
+                if device.type == 'cuda':
+                    print(f"CUDA memory: {torch.cuda.memory_allocated(0) / 1024**2:.2f}MB allocated, {torch.cuda.memory_reserved(0) / 1024**2:.2f}MB reserved")
         
         # Save generated samples at the end of each epoch
         with torch.no_grad():

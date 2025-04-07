@@ -56,20 +56,24 @@ def create_lbp_visualization(images, save_path=None):
     """Create visualization of images and their LBP representations"""
     batch_size = min(images.size(0), 8)  # Visualize up to 8 images
     
-    # Create empty canvas
-    canvas = np.zeros((48*2, 48*batch_size), dtype=np.uint8)
+    # Get the actual image dimensions
+    img_sample = ((images[0] + 1) * 127.5).detach().cpu().numpy().squeeze()
+    img_height, img_width = img_sample.shape
+    
+    # Create empty canvas with dynamic dimensions
+    canvas = np.zeros((img_height*2, img_width*batch_size), dtype=np.uint8)
     
     for i in range(batch_size):
         # Get image and convert to numpy
-        img = ((images[i] + 1) * 127.5).cpu().numpy().squeeze().astype(np.uint8)
+        img = ((images[i] + 1) * 127.5).detach().cpu().numpy().squeeze().astype(np.uint8)
         
         # Compute LBP
         lbp = local_binary_pattern(img, 8, 1, 'uniform')
-        lbp = ((lbp - lbp.min()) / (lbp.max() - lbp.min()) * 255).astype(np.uint8)
+        lbp = ((lbp - lbp.min()) / (lbp.max() - lbp.min() + 1e-10) * 255).astype(np.uint8)
         
-        # Place in canvas
-        canvas[0:48, i*48:(i+1)*48] = img
-        canvas[48:96, i*48:(i+1)*48] = lbp
+        # Place in canvas with dynamic sizing
+        canvas[0:img_height, i*img_width:(i+1)*img_width] = img
+        canvas[img_height:img_height*2, i*img_width:(i+1)*img_width] = lbp
     
     if save_path:
         cv2.imwrite(save_path, canvas)
