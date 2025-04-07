@@ -1,29 +1,24 @@
-# Paths
-FER2013_CSV_PATH = './data/fer2013/fer2013.csv'
-SYNTHETIC_DATA_DIR = './data/synthetic/'
+# Data paths
+FER2013_DIR = './data/FER2013'
 OUTPUT_DIR = './output'
 
-# GAN Training Parameters
+# Generator parameters
+LATENT_DIM = 128
+GEN_EMBED_DIM = 256
+GEN_NUM_HEADS = 8
+
+# Training parameters
 BATCH_SIZE = 64
-EPOCHS = 100
-LEARNING_RATE = 0.0002
+GAN_EPOCHS = 100
+VIT_EPOCHS = 50
+GAN_LR = 0.0002
+VIT_LR = 0.0001
 BETA1 = 0.5
 BETA2 = 0.999
-LAMBDA_CLS = 10.0
-LAMBDA_TEX = 5.0
 
-# ViT Training Parameters
-VIT_EPOCHS = 50
-VIT_LR = 0.0001
+# Loss weights
+LAMBDA_CLS = 10.0  # Weight for classification loss
+LAMBDA_TEX = 5.0   # Weight for texture preservation loss
 
-# Model Architecture Parameters
-LATENT_DIM = 128
-NUM_CLASSES = 7
-EMBED_DIM = 256
-NUM_HEADS = 8
-PATCH_SIZE = 4
-
-# Texture Analysis Parameters
-LBP_POINTS = 8
-LBP_RADIUS = 1
-LBP_METHOD = 'uniform' 
+# Evaluation parameters
+NUM_SYNTHETIC_SAMPLES = 3500  # 500 per class for 7 classes

@@ -1,23 +1,16 @@
 import numpy as np
-import cv2
+import torch
 from skimage.feature import local_binary_pattern
+import cv2
 
 def compute_lbp_features(image, num_points=8, radius=1, method='uniform'):
-    """
-    Compute LBP features for a grayscale image
-    
-    Args:
-        image: Input image (numpy array)
-        num_points: Number of circularly symmetric neighbor points
-        radius: Radius of circle
-        method: LBP method ('uniform', 'default', 'ror', or 'var')
-        
-    Returns:
-        LBP histogram features
-    """
-    # Ensure image is in grayscale and uint8 format
-    if len(image.shape) > 2:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    """Compute LBP features for a grayscale image"""
+    # Ensure image is in grayscale and numpy format
+    if isinstance(image, torch.Tensor):
+        # If tensor is in range [-1, 1], convert to [0, 255]
+        if image.min() < 0:
+            image = (image + 1) * 127.5
+        image = image.cpu().numpy().squeeze().astype(np.uint8)
     
     # Compute LBP
     lbp = local_binary_pattern(image, num_points, radius, method)
@@ -32,63 +25,53 @@ def compute_lbp_features(image, num_points=8, radius=1, method='uniform'):
     
     return hist
 
-def compute_lbp_image(image, num_points=8, radius=1, method='uniform'):
-    """
-    Compute LBP image for visualization or feature extraction
+def texture_consistency_loss(real_images, fake_images, batch_size=None):
+    """Compute texture consistency loss between real and fake images"""
+    if batch_size is None:
+        batch_size = real_images.size(0)
     
-    Args:
-        image: Input image (numpy array)
-        num_points: Number of circularly symmetric neighbor points
-        radius: Radius of circle
-        method: LBP method
-        
-    Returns:
-        LBP image
-    """
-    # Ensure image is in grayscale
-    if len(image.shape) > 2:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    
-    # Compute LBP
-    lbp = local_binary_pattern(image, num_points, radius, method)
-    
-    # Normalize to 0-255 for visualization
-    lbp_image = ((lbp - lbp.min()) / (lbp.max() - lbp.min()) * 255).astype(np.uint8)
-    
-    return lbp_image
-
-def texture_consistency_loss(real_images, fake_images, num_points=8, radius=1):
-    """
-    Compute texture consistency loss between real and fake images
-    
-    Args:
-        real_images: Batch of real images (torch tensor)
-        fake_images: Batch of fake images (torch tensor)
-        
-    Returns:
-        Texture consistency loss value
-    """
-    batch_size = real_images.shape[0]
+    # Initialize loss
     loss = 0.0
     
-    # Convert tensors to numpy arrays
-    real_np = real_images.detach().cpu().numpy()
-    fake_np = fake_images.detach().cpu().numpy()
-    
+    # Process each image in the batch
     for i in range(batch_size):
-        real_img = real_np[i, 0]  # Assuming single channel
-        fake_img = fake_np[i, 0]
+        real_img = real_images[i].detach().cpu()
+        fake_img = fake_images[i].detach().cpu()
         
-        # Scale to 0-255 and convert to uint8
-        real_img = (real_img * 127.5 + 127.5).astype(np.uint8)
-        fake_img = (fake_img * 127.5 + 127.5).astype(np.uint8)
+        # Scale from [-1, 1] to [0, 255]
+        real_img = ((real_img + 1) * 127.5).numpy().squeeze().astype(np.uint8)
+        fake_img = ((fake_img + 1) * 127.5).numpy().squeeze().astype(np.uint8)
         
         # Compute LBP histograms
-        real_hist = compute_lbp_features(real_img, num_points, radius)
-        fake_hist = compute_lbp_features(fake_img, num_points, radius)
+        real_hist = compute_lbp_features(real_img)
+        fake_hist = compute_lbp_features(fake_img)
         
-        # Compute histogram distance (chi-square distance)
-        chi_square_dist = np.sum((real_hist - fake_hist)**2 / (real_hist + fake_hist + 1e-10))
-        loss += chi_square_dist
+        # Compute chi-square distance between histograms
+        chi_square = np.sum((real_hist - fake_hist)**2 / (real_hist + fake_hist + 1e-10))
+        loss += chi_square
     
-    return loss / batch_size 
+    return torch.tensor(loss / batch_size, requires_grad=True).to(real_images.device)
+
+def create_lbp_visualization(images, save_path=None):
+    """Create visualization of images and their LBP representations"""
+    batch_size = min(images.size(0), 8)  # Visualize up to 8 images
+    
+    # Create empty canvas
+    canvas = np.zeros((48*2, 48*batch_size), dtype=np.uint8)
+    
+    for i in range(batch_size):
+        # Get image and convert to numpy
+        img = ((images[i] + 1) * 127.5).cpu().numpy().squeeze().astype(np.uint8)
+        
+        # Compute LBP
+        lbp = local_binary_pattern(img, 8, 1, 'uniform')
+        lbp = ((lbp - lbp.min()) / (lbp.max() - lbp.min()) * 255).astype(np.uint8)
+        
+        # Place in canvas
+        canvas[0:48, i*48:(i+1)*48] = img
+        canvas[48:96, i*48:(i+1)*48] = lbp
+    
+    if save_path:
+        cv2.imwrite(save_path, canvas)
+        
+    return canvas

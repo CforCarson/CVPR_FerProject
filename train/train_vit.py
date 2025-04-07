@@ -1,30 +1,44 @@
 import os
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, ConcatDataset
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 import numpy as np
+from tqdm import tqdm
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix
 import seaborn as sns
+import sys
+sys.path.append('..')
 
 from models.vit import ExpressionViT
-from utils.data_loader import FER2013Dataset, SyntheticDataset
+from utils.data_loader import FER2013FolderDataset, SyntheticDataset
 import config
 
-def train_vit(model, train_loader, val_loader, epochs=50, lr=0.0001, device='cuda', 
-              model_save_path='./vit_model.pth'):
+def train_vit(model, train_loader, test_loader, epochs=50, lr=0.0001, 
+              model_name="vit_model", output_dir='./output'):
     """Train the Vision Transformer model"""
+    # Create output directory
+    os.makedirs(os.path.join(output_dir, 'models'), exist_ok=True)
+    
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    # Loss function and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.5)
     
-    best_val_loss = float('inf')
+    # Training tracking
+    best_acc = 0.0
     train_losses = []
-    val_losses = []
-    train_accuracies = []
-    val_accuracies = []
+    test_losses = []
+    train_accs = []
+    test_accs = []
+    
+    print(f"Starting training for {epochs} epochs...")
     
     for epoch in range(epochs):
         # Training
@@ -46,7 +60,7 @@ def train_vit(model, train_loader, val_loader, epochs=50, lr=0.0001, device='cud
             loss.backward()
             optimizer.step()
             
-            # Track loss and accuracy
+            # Track statistics
             train_loss += loss.item()
             _, predicted = torch.max(outputs.data, 1)
             train_total += labels.size(0)
@@ -57,75 +71,84 @@ def train_vit(model, train_loader, val_loader, epochs=50, lr=0.0001, device='cud
                 f"[Epoch {epoch+1}/{epochs}] [Train Loss: {loss.item():.4f}]"
             )
         
-        # Calculate average training metrics
-        avg_train_loss = train_loss / len(train_loader)
-        train_accuracy = 100. * train_correct / train_total
-        train_losses.append(avg_train_loss)
-        train_accuracies.append(train_accuracy)
+        # Calculate training metrics
+        epoch_train_loss = train_loss / len(train_loader)
+        epoch_train_acc = 100. * train_correct / train_total
+        train_losses.append(epoch_train_loss)
+        train_accs.append(epoch_train_acc)
         
-        # Validation
+        # Evaluation
         model.eval()
-        val_loss = 0.0
-        val_correct = 0
-        val_total = 0
+        test_loss = 0.0
+        test_correct = 0
+        test_total = 0
         
         with torch.no_grad():
-            for images, labels in val_loader:
+            for images, labels in test_loader:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 
-                val_loss += loss.item()
+                # Track statistics
+                test_loss += loss.item()
                 _, predicted = torch.max(outputs.data, 1)
-                val_total += labels.size(0)
-                val_correct += (predicted == labels).sum().item()
+                test_total += labels.size(0)
+                test_correct += (predicted == labels).sum().item()
         
-        # Calculate average validation metrics
-        avg_val_loss = val_loss / len(val_loader)
-        val_accuracy = 100. * val_correct / val_total
-        val_losses.append(avg_val_loss)
-        val_accuracies.append(val_accuracy)
+        # Calculate test metrics
+        epoch_test_loss = test_loss / len(test_loader)
+        epoch_test_acc = 100. * test_correct / test_total
+        test_losses.append(epoch_test_loss)
+        test_accs.append(epoch_test_acc)
         
         # Update learning rate
-        scheduler.step(avg_val_loss)
+        scheduler.step(epoch_test_loss)
         
         # Print epoch results
         print(f"Epoch {epoch+1}/{epochs} - "
-              f"Train Loss: {avg_train_loss:.4f}, Train Acc: {train_accuracy:.2f}%, "
-              f"Val Loss: {avg_val_loss:.4f}, Val Acc: {val_accuracy:.2f}%")
+              f"Train Loss: {epoch_train_loss:.4f}, Train Acc: {epoch_train_acc:.2f}%, "
+              f"Test Loss: {epoch_test_loss:.4f}, Test Acc: {epoch_test_acc:.2f}%")
         
         # Save best model
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), model_save_path)
-            print(f"Model saved with val_loss: {best_val_loss:.4f}")
+        if epoch_test_acc > best_acc:
+            best_acc = epoch_test_acc
+            torch.save(model.state_dict(), os.path.join(output_dir, 'models', f'{model_name}_best.pth'))
+            print(f"Saved best model with test accuracy: {best_acc:.2f}%")
     
     # Plot training curves
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
-    plt.plot(train_losses, label='Train Loss')
-    plt.plot(val_losses, label='Val Loss')
+    plt.plot(train_losses, label='Train')
+    plt.plot(test_losses, label='Test')
+    plt.title('Loss')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
     
     plt.subplot(1, 2, 2)
-    plt.plot(train_accuracies, label='Train Accuracy')
-    plt.plot(val_accuracies, label='Val Accuracy')
+    plt.plot(train_accs, label='Train')
+    plt.plot(test_accs, label='Test')
+    plt.title('Accuracy')
     plt.xlabel('Epoch')
     plt.ylabel('Accuracy (%)')
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig('./training_curves.png')
+    plt.savefig(os.path.join(output_dir, f'{model_name}_training_curves.png'))
     plt.close()
     
-    return model
+    # Save final model
+    torch.save(model.state_dict(), os.path.join(output_dir, 'models', f'{model_name}_final.pth'))
+    
+    return model, best_acc
 
-def evaluate_model(model, test_loader, device='cuda'):
-    """Evaluate the model on test data"""
+def evaluate_model(model, test_loader, output_dir='./output', model_name="vit_model"):
+    """Evaluate model performance with detailed metrics"""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
     model.eval()
     
+    # For storing predictions and labels
     all_preds = []
     all_labels = []
     all_probs = []
@@ -134,7 +157,7 @@ def evaluate_model(model, test_loader, device='cuda'):
         for images, labels in tqdm(test_loader, desc="Evaluating"):
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
-            probs = torch.nn.functional.softmax(outputs, dim=1)
+            probs = torch.softmax(outputs, dim=1)
             
             _, preds = torch.max(outputs, 1)
             
@@ -149,8 +172,6 @@ def evaluate_model(model, test_loader, device='cuda'):
     
     # Calculate metrics
     accuracy = accuracy_score(all_labels, all_preds)
-    
-    # Calculate F1 score for each class and average
     f1 = f1_score(all_labels, all_preds, average='weighted')
     
     # Calculate AUROC (one-vs-rest for multiclass)
@@ -168,100 +189,155 @@ def evaluate_model(model, test_loader, device='cuda'):
     avg_auroc = np.mean(auroc_scores)
     
     # Create confusion matrix
+    class_names = ['Angry', 'Disgust', 'Fear', 'Happy', 'Neutral', 'Sad', 'Surprise']
     cm = confusion_matrix(all_labels, all_preds)
     plt.figure(figsize=(10, 8))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-               xticklabels=['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral'],
-               yticklabels=['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral'])
+               xticklabels=class_names,
+               yticklabels=class_names)
     plt.xlabel('Predicted')
     plt.ylabel('True')
     plt.title('Confusion Matrix')
-    plt.savefig('./confusion_matrix.png')
+    plt.savefig(os.path.join(output_dir, f'{model_name}_confusion_matrix.png'))
     plt.close()
     
+    # Per-class metrics
+    per_class_metrics = {}
+    for i, class_name in enumerate(class_names):
+        true_pos = np.sum((all_preds == i) & (all_labels == i))
+        false_pos = np.sum((all_preds == i) & (all_labels != i))
+        false_neg = np.sum((all_preds != i) & (all_labels == i))
+        
+        precision = true_pos / (true_pos + false_pos + 1e-10)
+        recall = true_pos / (true_pos + false_neg + 1e-10)
+        class_f1 = 2 * precision * recall / (precision + recall + 1e-10)
+        
+        per_class_metrics[class_name] = {
+            'precision': precision,
+            'recall': recall,
+            'f1': class_f1
+        }
+    
     # Print results
-    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Overall Accuracy: {accuracy:.4f}")
     print(f"F1 Score (weighted): {f1:.4f}")
     print(f"Average AUROC: {avg_auroc:.4f}")
+    print("\nPer-class metrics:")
+    for class_name, metrics in per_class_metrics.items():
+        print(f"{class_name}: Precision: {metrics['precision']:.4f}, "
+              f"Recall: {metrics['recall']:.4f}, F1: {metrics['f1']:.4f}")
     
     return {
         'accuracy': accuracy,
         'f1_score': f1,
         'auroc': avg_auroc,
-        'confusion_matrix': cm
+        'confusion_matrix': cm,
+        'per_class_metrics': per_class_metrics
     }
 
-def run_comparative_experiments(device='cuda'):
-    """Run comparative experiments with real, synthetic, and mixed data"""
-    # Setup dataloaders
+def run_comparative_experiments(output_dir='./output'):
+    """Run experiments with real, synthetic, and mixed datasets"""
+    from torchvision import transforms
+    
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    
+    # Create transform for all datasets
     transform = transforms.Compose([
-        transforms.ToPILImage(),
+        transforms.Resize((48, 48)),
         transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
+        transforms.Normalize(mean=[0.5], std=[0.5])  # Normalize to [-1, 1]
     ])
     
-    # Real data
-    real_train_dataset = FER2013Dataset(config.FER2013_CSV_PATH, transform=transform, mode='train')
-    real_train_loader = DataLoader(real_train_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=4)
+    # Create datasets
+    real_dataset = FER2013FolderDataset(root_dir=config.FER2013_DIR, mode='train', transform=transform)
+    synthetic_dataset = SyntheticDataset(root_dir=os.path.join(output_dir, 'synthetic'), transform=transform)
+    test_dataset = FER2013FolderDataset(root_dir=config.FER2013_DIR, mode='test', transform=transform)
     
-    # Synthetic data
-    synthetic_dataset = SyntheticDataset(config.SYNTHETIC_DATA_DIR, transform=transform)
+    # Create mixed dataset
+    mixed_dataset = ConcatDataset([real_dataset, synthetic_dataset])
+    
+    # Create dataloaders
+    real_loader = DataLoader(real_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=4)
     synthetic_loader = DataLoader(synthetic_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=4)
-    
-    # Mixed data
-    mixed_dataset = ConcatDataset([real_train_dataset, synthetic_dataset])
     mixed_loader = DataLoader(mixed_dataset, batch_size=config.BATCH_SIZE, shuffle=True, num_workers=4)
-    
-    # Test data
-    test_dataset = FER2013Dataset(config.FER2013_CSV_PATH, transform=transform, mode='test')
     test_loader = DataLoader(test_dataset, batch_size=config.BATCH_SIZE, shuffle=False, num_workers=4)
     
-    # Results dictionary
+    # Store results
     results = {}
     
-    # Train and evaluate on real data
+    # Train on real data
     print("\n===== Training on Real Data =====")
     real_model = ExpressionViT().to(device)
-    real_model = train_vit(real_model, real_train_loader, test_loader, 
-                          epochs=config.VIT_EPOCHS, lr=config.VIT_LR, 
-                          model_save_path='./real_vit_model.pth')
-    real_model.load_state_dict(torch.load('./real_vit_model.pth'))
-    results['real'] = evaluate_model(real_model, test_loader, device)
+    real_model, real_acc = train_vit(
+        real_model, real_loader, test_loader, 
+        epochs=config.VIT_EPOCHS, lr=config.VIT_LR,
+        model_name="real_vit", output_dir=output_dir
+    )
+    real_model.load_state_dict(torch.load(os.path.join(output_dir, 'models', 'real_vit_best.pth')))
+    results['real'] = evaluate_model(real_model, test_loader, output_dir, "real_vit")
     
-    # Train and evaluate on synthetic data
+    # Train on synthetic data
     print("\n===== Training on Synthetic Data =====")
     synthetic_model = ExpressionViT().to(device)
-    synthetic_model = train_vit(synthetic_model, synthetic_loader, test_loader,
-                               epochs=config.VIT_EPOCHS, lr=config.VIT_LR,
-                               model_save_path='./synthetic_vit_model.pth')
-    synthetic_model.load_state_dict(torch.load('./synthetic_vit_model.pth'))
-    results['synthetic'] = evaluate_model(synthetic_model, test_loader, device)
+    synthetic_model, synth_acc = train_vit(
+        synthetic_model, synthetic_loader, test_loader,
+        epochs=config.VIT_EPOCHS, lr=config.VIT_LR,
+        model_name="synthetic_vit", output_dir=output_dir
+    )
+    synthetic_model.load_state_dict(torch.load(os.path.join(output_dir, 'models', 'synthetic_vit_best.pth')))
+    results['synthetic'] = evaluate_model(synthetic_model, test_loader, output_dir, "synthetic_vit")
     
-    # Train and evaluate on mixed data
+    # Train on mixed data
     print("\n===== Training on Mixed Data =====")
     mixed_model = ExpressionViT().to(device)
-    mixed_model = train_vit(mixed_model, mixed_loader, test_loader,
-                           epochs=config.VIT_EPOCHS, lr=config.VIT_LR,
-                           model_save_path='./mixed_vit_model.pth')
-    mixed_model.load_state_dict(torch.load('./mixed_vit_model.pth'))
-    results['mixed'] = evaluate_model(mixed_model, test_loader, device)
+    mixed_model, mixed_acc = train_vit(
+        mixed_model, mixed_loader, test_loader,
+        epochs=config.VIT_EPOCHS, lr=config.VIT_LR,
+        model_name="mixed_vit", output_dir=output_dir
+    )
+    mixed_model.load_state_dict(torch.load(os.path.join(output_dir, 'models', 'mixed_vit_best.pth')))
+    results['mixed'] = evaluate_model(mixed_model, test_loader, output_dir, "mixed_vit")
     
-    # Print comparative results
+    # Comparative summary
     print("\n===== Comparative Results =====")
     print(f"{'Dataset':<10} {'Accuracy':<10} {'F1 Score':<10} {'AUROC':<10}")
-    print("-" * 42)
+    print("-" * 45)
     for dataset, metrics in results.items():
-        print(f"{dataset:<10} {metrics['accuracy']:<10.4f} {metrics['f1_score']:<10.4f} {metrics['auroc']:<10.4f}")
+        print(f"{dataset:<10} {metrics['accuracy']:.4f}      {metrics['f1_score']:.4f}      {metrics['auroc']:.4f}")
+    
+    # Create comparative visualization
+    plt.figure(figsize=(12, 6))
+    datasets = list(results.keys())
+    accuracies = [results[d]['accuracy'] for d in datasets]
+    f1_scores = [results[d]['f1_score'] for d in datasets]
+    aurocs = [results[d]['auroc'] for d in datasets]
+    
+    x = np.arange(len(datasets))
+    width = 0.25
+    
+    plt.bar(x - width, accuracies, width, label='Accuracy')
+    plt.bar(x, f1_scores, width, label='F1 Score')
+    plt.bar(x + width, aurocs, width, label='AUROC')
+    
+    plt.xlabel('Training Dataset')
+    plt.ylabel('Score')
+    plt.title('Comparison of Model Performance')
+    plt.xticks(x, datasets)
+    plt.legend()
+    plt.ylim(0, 1.0)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'comparative_results.png'))
+    plt.close()
     
     return results
 
 if __name__ == "__main__":
-    # Set random seed for reproducibility
-    torch.manual_seed(42)
+    parser = argparse.ArgumentParser(description="Train and evaluate ViT")
+    parser.add_argument("--epochs", type=int, default=config.VIT_EPOCHS, help="Number of epochs")
+    parser.add_argument("--batch_size", type=int, default=config.BATCH_SIZE, help="Batch size")
+    parser.add_argument("--lr", type=float, default=config.VIT_LR, help="Learning rate")
+    args = parser.parse_args()
     
-    # Check for GPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    
-    # Run comparative experiments
-    run_comparative_experiments(device) 
+    run_comparative_experiments(output_dir=config.OUTPUT_DIR)
