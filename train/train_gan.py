@@ -45,7 +45,7 @@ def train_texPGAN(train_loader, epochs=100, lr=0.0002, beta1=0.5, beta2=0.999,
     
     # Create fixed noise and labels for visualization
     fixed_noise = torch.randn(64, config.LATENT_DIM, device=device)
-    fixed_labels = torch.tensor([i//8 for i in range(64)], device=device)
+    fixed_labels = torch.tensor([i//8 % 7 for i in range(64)], device=device)
     
     # Training loop
     print(f"Starting training for {epochs} epochs...")
