@@ -29,46 +29,12 @@ def create_dir_structure():
     os.makedirs('./output/samples', exist_ok=True)
     os.makedirs('./output/synthetic', exist_ok=True)
 
-def check_gpu():
-    """Check GPU availability and print detailed information"""
-    print("\n=== GPU Information ===")
-    if torch.cuda.is_available():
-        device_count = torch.cuda.device_count()
-        print(f"CUDA is available with {device_count} device(s)")
-        for i in range(device_count):
-            device_name = torch.cuda.get_device_name(i)
-            print(f"Device {i}: {device_name}")
-        
-        # Set default device to GPU 0
-        torch.cuda.set_device(0)
-        print(f"Using device: {torch.cuda.get_device_name(0)}")
-        print(f"Current device: {torch.cuda.current_device()}")
-        
-        # Print memory information
-        print(f"Memory allocated: {torch.cuda.memory_allocated(0) / 1024**2:.2f} MB")
-        print(f"Memory cached: {torch.cuda.memory_reserved(0) / 1024**2:.2f} MB")
-        
-        return True
-    else:
-        print("CUDA is NOT available. Training will use CPU which will be much slower.")
-        print("If you have an NVIDIA GPU, please make sure you have installed:")
-        print("  1. Appropriate NVIDIA drivers")
-        print("  2. CUDA Toolkit")
-        print("  3. PyTorch with CUDA support")
-        print("\nCurrent PyTorch configuration:")
-        print(f"  PyTorch version: {torch.__version__}")
-        print(f"  CUDA built: {torch.version.cuda}")
-        return False
-
 def main(args):
     # Set random seed
     set_seed(args.seed)
     
     # Create directory structure
     create_dir_structure()
-    
-    # Check GPU availability
-    has_gpu = check_gpu()
     
     # Check if data exists
     if not os.path.exists(config.FER2013_DIR):
@@ -109,15 +75,6 @@ if __name__ == "__main__":
                         help='Number of epochs for GAN training')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
-    parser.add_argument('--force_cpu', action='store_true',
-                        help='Force using CPU even if GPU is available')
     
     args = parser.parse_args()
-    
-    # Override CUDA availability if force_cpu is specified
-    if args.force_cpu:
-        print("Forcing CPU usage as requested")
-        # This will make torch.cuda.is_available() return False globally
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    
     main(args)
