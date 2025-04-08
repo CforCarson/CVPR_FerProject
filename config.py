@@ -9,7 +9,7 @@ GEN_NUM_HEADS = 8
 
 # Training parameters
 BATCH_SIZE = 64
-GAN_EPOCHS = 100
+GAN_EPOCHS = 150
 VIT_EPOCHS = 50
 GAN_LR = 0.0002
 VIT_LR = 0.0001
@@ -17,8 +17,19 @@ BETA1 = 0.5
 BETA2 = 0.999
 
 # Loss weights
-LAMBDA_CLS = 10.0  # Weight for classification loss
-LAMBDA_TEX = 5.0   # Weight for texture preservation loss
+LAMBDA_CLS = 12.0
+LAMBDA_TEX = 8.0
 
 # Evaluation parameters
-NUM_SYNTHETIC_SAMPLES = 3500  # 500 per class for 7 classes
+NUM_SYNTHETIC_SAMPLES = 5000
+
+# Data augmentation parameters
+USE_AUGMENTED_DATASET = True
+NUM_AUGMENTATIONS = 3
+
+# Texture enhancement parameters
+CLAHE_CLIP_LIMIT = 2.0
+CLAHE_GRID_SIZE = (8, 8)
+
+# Balanced sampling
+USE_BALANCED_SAMPLING = True

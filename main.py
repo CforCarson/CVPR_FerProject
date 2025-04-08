@@ -9,7 +9,7 @@ sys.path.append('./utils')
 
 from train.train_gan import train_texPGAN
 from train.train_vit import run_comparative_experiments
-from utils.data_loader import get_dataloaders
+from utils.data_loader import get_dataloaders, balanced_sampling_dataloader
 import config
 
 def set_seed(seed):
@@ -28,6 +28,8 @@ def create_dir_structure():
     os.makedirs('./output/models', exist_ok=True)
     os.makedirs('./output/samples', exist_ok=True)
     os.makedirs('./output/synthetic', exist_ok=True)
+    for cls in ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']:
+        os.makedirs(f'./output/synthetic/{cls}', exist_ok=True)
 
 def main(args):
     # Set random seed
@@ -43,13 +45,43 @@ def main(args):
         sys.exit(1)
     
     # Get data loaders
-    train_loader, test_loader = get_dataloaders(
-        config.FER2013_DIR, 
-        batch_size=config.BATCH_SIZE
-    )
+    print("Initializing data loaders...")
+    if args.stage == 'gan' or args.stage == 'all':
+        if config.USE_AUGMENTED_DATASET:
+            print("Using augmented dataset with additional transformations...")
+            train_loader, test_loader = get_dataloaders(
+                config.FER2013_DIR, 
+                batch_size=config.BATCH_SIZE,
+                augment=True
+            )
+            
+            # Apply balanced sampling if configured
+            if config.USE_BALANCED_SAMPLING:
+                print("Applying balanced class sampling...")
+                if hasattr(train_loader.dataset, 'original_dataset'):
+                    balanced_dataset = train_loader.dataset.original_dataset
+                else:
+                    balanced_dataset = train_loader.dataset
+                
+                train_loader = balanced_sampling_dataloader(balanced_dataset, batch_size=config.BATCH_SIZE)
+        else:
+            train_loader, test_loader = get_dataloaders(
+                config.FER2013_DIR, 
+                batch_size=config.BATCH_SIZE
+            )
+    else:
+        train_loader, test_loader = get_dataloaders(
+            config.FER2013_DIR, 
+            batch_size=config.BATCH_SIZE
+        )
     
     if args.stage == 'gan' or args.stage == 'all':
         print("=== Training TexPGAN for Synthetic Image Generation ===")
+        print(f"- Texture enhancement weight: {config.LAMBDA_TEX}")
+        print(f"- Classification weight: {config.LAMBDA_CLS}")
+        print(f"- Training for {config.GAN_EPOCHS} epochs")
+        print(f"- Will generate {config.NUM_SYNTHETIC_SAMPLES} synthetic images")
+        
         train_texPGAN(
             train_loader=train_loader,
             epochs=args.gan_epochs,
@@ -60,12 +92,19 @@ def main(args):
             lambda_tex=config.LAMBDA_TEX,
             output_dir=config.OUTPUT_DIR
         )
+        
+        print("\nGAN training completed. Synthetic images generated.")
     
     if args.stage == 'vit' or args.stage == 'all':
         print("=== Training and Evaluating ViT for Expression Recognition ===")
+        print(f"- Using Vision Transformer for classification")
+        print(f"- Will conduct comparative experiments on real, synthetic, and mixed datasets")
+        print(f"- Training for {config.VIT_EPOCHS} epochs for each experiment")
+        
         run_comparative_experiments(output_dir=config.OUTPUT_DIR)
     
-    print("=== Project execution completed! ===")
+    print("\n=== Project execution completed! ===")
+    print(f"Results saved to {config.OUTPUT_DIR}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Texture-Enhanced Conditional GAN for FER")
@@ -73,6 +112,8 @@ if __name__ == "__main__":
                         help='Which stage to run: gan, vit, or all')
     parser.add_argument('--gan_epochs', type=int, default=config.GAN_EPOCHS,
                         help='Number of epochs for GAN training')
+    parser.add_argument('--vit_epochs', type=int, default=config.VIT_EPOCHS,
+                        help='Number of epochs for ViT training')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
     
