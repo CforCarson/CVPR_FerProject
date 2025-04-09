@@ -8,6 +8,7 @@ sys.path.append('./train')
 sys.path.append('./utils')
 
 from train.train_gan import train_texPGAN
+from train.train_complex_gan import train_complex_GAN
 from train.train_vit import run_comparative_experiments
 from utils.data_loader import get_dataloaders, balanced_sampling_dataloader
 import config
@@ -27,6 +28,7 @@ def create_dir_structure():
     """Create necessary directories"""
     os.makedirs('./output/models', exist_ok=True)
     os.makedirs('./output/samples', exist_ok=True)
+    os.makedirs('./output/samples/valid', exist_ok=True)
     os.makedirs('./output/synthetic', exist_ok=True)
     for cls in ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']:
         os.makedirs(f'./output/synthetic/{cls}', exist_ok=True)
@@ -46,7 +48,7 @@ def main(args):
     
     # Get data loaders
     print("Initializing data loaders...")
-    if args.stage == 'gan' or args.stage == 'all':
+    if args.stage == 'gan' or args.stage == 'complex_gan' or args.stage == 'all':
         if config.USE_AUGMENTED_DATASET:
             print("Using augmented dataset with additional transformations...")
             train_loader, test_loader = get_dataloaders(
@@ -75,11 +77,11 @@ def main(args):
             batch_size=config.BATCH_SIZE
         )
     
-    if args.stage == 'gan' or args.stage == 'all':
-        print("=== Training TexPGAN for Synthetic Image Generation ===")
+    if args.stage == 'gan':
+        print("=== Training Original TexPGAN for Synthetic Image Generation ===")
         print(f"- Texture enhancement weight: {config.LAMBDA_TEX}")
         print(f"- Classification weight: {config.LAMBDA_CLS}")
-        print(f"- Training for {config.GAN_EPOCHS} epochs")
+        print(f"- Training for {args.gan_epochs} epochs")
         print(f"- Will generate {config.NUM_SYNTHETIC_SAMPLES} synthetic images")
         
         train_texPGAN(
@@ -95,11 +97,64 @@ def main(args):
         
         print("\nGAN training completed. Synthetic images generated.")
     
-    if args.stage == 'vit' or args.stage == 'all':
+    elif args.stage == 'complex_gan':
+        print("=== Training Enhanced Complex GAN for Synthetic Image Generation ===")
+        print(f"- Using deeper network architecture with self-attention")
+        print(f"- Using spectral normalization and enhanced texture preservation")
+        print(f"- Using face detection validation to filter generated images")
+        print(f"- Texture enhancement weight: {config.LAMBDA_TEX}")
+        print(f"- Classification weight: {config.LAMBDA_CLS}")
+        print(f"- Training for {args.gan_epochs} epochs with lower learning rate")
+        print(f"- Will generate {config.NUM_SYNTHETIC_SAMPLES} validated synthetic images")
+        
+        train_complex_GAN(
+            train_loader=train_loader,
+            epochs=args.gan_epochs,
+            lr=config.COMPLEX_GAN_LR,
+            beta1=config.BETA1,
+            beta2=config.BETA2,
+            lambda_cls=config.LAMBDA_CLS,
+            lambda_tex=config.LAMBDA_TEX,
+            output_dir=config.OUTPUT_DIR
+        )
+        
+        print("\nComplex GAN training completed. Validated synthetic images generated.")
+    
+    elif args.stage == 'all':
+        print("=== Training Enhanced Complex GAN for Synthetic Image Generation ===")
+        print(f"- Using deeper network architecture with self-attention")
+        print(f"- Using spectral normalization and enhanced texture preservation")
+        print(f"- Using face detection validation to filter generated images")
+        print(f"- Texture enhancement weight: {config.LAMBDA_TEX}")
+        print(f"- Classification weight: {config.LAMBDA_CLS}")
+        print(f"- Training for {args.gan_epochs} epochs with lower learning rate")
+        print(f"- Will generate {config.NUM_SYNTHETIC_SAMPLES} validated synthetic images")
+        
+        train_complex_GAN(
+            train_loader=train_loader,
+            epochs=args.gan_epochs,
+            lr=config.COMPLEX_GAN_LR,
+            beta1=config.BETA1,
+            beta2=config.BETA2,
+            lambda_cls=config.LAMBDA_CLS,
+            lambda_tex=config.LAMBDA_TEX,
+            output_dir=config.OUTPUT_DIR
+        )
+        
+        print("\nComplex GAN training completed. Validated synthetic images generated.")
+        
         print("=== Training and Evaluating ViT for Expression Recognition ===")
         print(f"- Using Vision Transformer for classification")
         print(f"- Will conduct comparative experiments on real, synthetic, and mixed datasets")
-        print(f"- Training for {config.VIT_EPOCHS} epochs for each experiment")
+        print(f"- Training for {args.vit_epochs} epochs for each experiment")
+        
+        run_comparative_experiments(output_dir=config.OUTPUT_DIR)
+    
+    elif args.stage == 'vit':
+        print("=== Training and Evaluating ViT for Expression Recognition ===")
+        print(f"- Using Vision Transformer for classification")
+        print(f"- Will conduct comparative experiments on real, synthetic, and mixed datasets")
+        print(f"- Training for {args.vit_epochs} epochs for each experiment")
         
         run_comparative_experiments(output_dir=config.OUTPUT_DIR)
     
@@ -108,8 +163,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Texture-Enhanced Conditional GAN for FER")
-    parser.add_argument('--stage', type=str, default='all', choices=['gan', 'vit', 'all'],
-                        help='Which stage to run: gan, vit, or all')
+    parser.add_argument('--stage', type=str, default='all', 
+                        choices=['gan', 'complex_gan', 'vit', 'all'],
+                        help='Which stage to run: gan, complex_gan, vit, or all')
     parser.add_argument('--gan_epochs', type=int, default=config.GAN_EPOCHS,
                         help='Number of epochs for GAN training')
     parser.add_argument('--vit_epochs', type=int, default=config.VIT_EPOCHS,

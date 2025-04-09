@@ -12,6 +12,7 @@ BATCH_SIZE = 64
 GAN_EPOCHS = 150
 VIT_EPOCHS = 50
 GAN_LR = 0.0002
+COMPLEX_GAN_LR = 0.0001  # Lower learning rate for complex GAN
 VIT_LR = 0.0001
 BETA1 = 0.5
 BETA2 = 0.999
@@ -33,3 +34,12 @@ CLAHE_GRID_SIZE = (8, 8)
 
 # Balanced sampling
 USE_BALANCED_SAMPLING = True
+
+# Face validation parameters
+FACE_VALIDATION_THRESHOLD = 0.66  # Minimum confidence for valid face
+FACE_VALIDATION_BATCH_SIZE = 32   # Batch size for face validation
+USE_FACE_VALIDATION = True        # Whether to use face validation during training
+
+# Complex GAN parameters
+COMPLEX_GAN_NGF = 64  # Generator feature maps
+COMPLEX_GAN_NDF = 64  # Discriminator feature maps
