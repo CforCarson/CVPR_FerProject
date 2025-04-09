@@ -166,9 +166,15 @@ def train_complex_GAN(train_loader, epochs=300, lr=0.0001, beta1=0.5, beta2=0.99
             # Texture preservation loss (enhanced)
             g_tex_loss = texture_consistency_loss(real_images_enhanced, gen_images_enhanced)
             
-            # Feature matching loss
+            # Feature matching loss with adaptive pooling to ensure same dimensions
             features_real = discriminator.feature_extractor[0:9](real_images_enhanced)
             features_fake = discriminator.feature_extractor[0:9](gen_images_enhanced)
+            
+            # Ensure dimensions match by using adaptive pooling
+            if features_real.shape != features_fake.shape:
+                adaptive_pool = nn.AdaptiveAvgPool2d((features_real.shape[2], features_real.shape[3]))
+                features_fake = adaptive_pool(features_fake)
+                
             feature_matching_loss = nn.MSELoss()(features_fake, features_real.detach())
             
             # Total generator loss

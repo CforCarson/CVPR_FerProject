@@ -64,25 +64,47 @@ def spectral_norm(module, name='weight', power_iterations=1):
     return SpectralNorm(module, name, power_iterations)
 
 class SelfAttention(nn.Module):
-    """Self attention module for the generator"""
+    """Self attention module with simplified implementation"""
     def __init__(self, in_channels):
         super(SelfAttention, self).__init__()
-        self.query = spectral_norm(nn.Conv1d(in_channels, in_channels // 8, 1))
-        self.key = spectral_norm(nn.Conv1d(in_channels, in_channels // 8, 1))
-        self.value = spectral_norm(nn.Conv1d(in_channels, in_channels, 1))
+        self.in_channels = in_channels
+        self.query_channels = max(in_channels // 8, 1)
+        
+        # Use standard convolutions without spectral norm for simplicity
+        self.query = nn.Conv1d(in_channels, self.query_channels, kernel_size=1)
+        self.key = nn.Conv1d(in_channels, self.query_channels, kernel_size=1)
+        self.value = nn.Conv1d(in_channels, in_channels, kernel_size=1)
+        
         self.gamma = nn.Parameter(torch.zeros(1))
+        
+        # Initialize weights
+        nn.init.xavier_uniform_(self.query.weight)
+        nn.init.xavier_uniform_(self.key.weight)
+        nn.init.xavier_uniform_(self.value.weight)
 
     def forward(self, x):
-        batch, C, width, height = x.size()
-        proj_query = self.query(x.view(batch, C, -1))  # B x C' x (WH)
-        proj_key = self.key(x.view(batch, C, -1))  # B x C' x (WH)
-        energy = torch.bmm(proj_query.permute(0, 2, 1), proj_key)  # B x (WH) x (WH)
-        attention = F.softmax(energy, dim=2)  # B x (WH) x (WH)
-        proj_value = self.value(x.view(batch, C, -1))  # B x C x (WH)
-        out = torch.bmm(proj_value, attention.permute(0, 2, 1))  # B x C x (WH)
-        out = out.view(batch, C, width, height)
-        out = self.gamma * out + x
-        return out
+        batch_size, C, width, height = x.size()
+        
+        # Flatten spatial dimensions
+        flat_x = x.view(batch_size, C, -1)  # B x C x (WH)
+        
+        # Get projections
+        q = self.query(flat_x)  # B x (C/8) x (WH)
+        k = self.key(flat_x)    # B x (C/8) x (WH)
+        v = self.value(flat_x)  # B x C x (WH)
+        
+        # Attention mechanism
+        attention = torch.bmm(q.permute(0, 2, 1), k)  # B x (WH) x (WH)
+        attention = F.softmax(attention, dim=-1)
+        
+        # Apply attention to value projection
+        out = torch.bmm(v, attention.permute(0, 2, 1))  # B x C x (WH)
+        
+        # Reshape to original dimensions
+        out = out.view(batch_size, C, width, height)
+        
+        # Residual connection with learned scale
+        return self.gamma * out + x
 
 class LBPTextureModule(nn.Module):
     """Enhanced LBP-guided texture preservation module"""
@@ -190,17 +212,26 @@ class ComplexGenerator(nn.Module):
         self.to(self.device)
     
     def _init_weights(self, m):
-        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
-            nn.init.normal_(m.weight, 0.0, 0.02)
-            if m.bias is not None:
+        # Fix for spectral normalized layers where direct weight access causes error
+        if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d, nn.Linear)):
+            try:
+                if hasattr(m, 'weight') and m.weight is not None:
+                    nn.init.normal_(m.weight, 0.0, 0.02)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            except AttributeError:
+                # Skip if wrapped by spectral normalization
+                pass
+        elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+            if hasattr(m, 'weight') and m.weight is not None:
+                nn.init.normal_(m.weight, 1.0, 0.02)
+            if hasattr(m, 'bias') and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.BatchNorm2d):
-            nn.init.normal_(m.weight, 1.0, 0.02)
-            nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.Linear):
-            nn.init.normal_(m.weight, 0.0, 0.02)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Embedding):
+            try:
+                nn.init.normal_(m.weight, std=0.02)
+            except AttributeError:
+                pass
     
     def forward(self, z, class_labels):
         # Get class embedding

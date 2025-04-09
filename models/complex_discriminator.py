@@ -1,7 +1,52 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from models.complex_generator import spectral_norm, SelfAttention
+from models.complex_generator import spectral_norm
+
+# Add a fixed SelfAttention implementation that matches the generator version
+class SelfAttention(nn.Module):
+    """Self attention module with simplified implementation"""
+    def __init__(self, in_channels):
+        super(SelfAttention, self).__init__()
+        self.in_channels = in_channels
+        self.query_channels = max(in_channels // 8, 1)
+        
+        # Use standard convolutions without spectral norm for simplicity
+        self.query = nn.Conv1d(in_channels, self.query_channels, kernel_size=1)
+        self.key = nn.Conv1d(in_channels, self.query_channels, kernel_size=1)
+        self.value = nn.Conv1d(in_channels, in_channels, kernel_size=1)
+        
+        self.gamma = nn.Parameter(torch.zeros(1))
+        
+        # Initialize weights
+        nn.init.xavier_uniform_(self.query.weight)
+        nn.init.xavier_uniform_(self.key.weight)
+        nn.init.xavier_uniform_(self.value.weight)
+
+    def forward(self, x):
+        batch_size, C, width, height = x.size()
+        
+        # Flatten spatial dimensions
+        flat_x = x.view(batch_size, C, -1)  # B x C x (WH)
+        
+        # Get projections
+        q = self.query(flat_x)  # B x (C/8) x (WH)
+        k = self.key(flat_x)    # B x (C/8) x (WH)
+        v = self.value(flat_x)  # B x C x (WH)
+        
+        # Attention mechanism
+        attention = torch.bmm(q.permute(0, 2, 1), k)  # B x (WH) x (WH)
+        attention = F.softmax(attention, dim=-1)
+        
+        # Apply attention to value projection
+        out = torch.bmm(v, attention.permute(0, 2, 1))  # B x C x (WH)
+        
+        # Reshape to original dimensions
+        out = out.view(batch_size, C, width, height)
+        
+        # Residual connection with learned scale
+        return self.gamma * out + x
 
 class LBPDiscriminatorModule(nn.Module):
     """Enhanced texture assessment module using LBP-inspired convolutions"""
@@ -61,7 +106,8 @@ class DualBranchComplexDiscriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True)
         )
         
-        # Self-attention module at 8x8 feature map
+        # Self-attention module at 8x8 feature map with ndf*4 channels
+        # The discriminator has 4x the channels compared to the generator at this point
         self.attention = SelfAttention(ndf * 4)
         
         # Real/Fake classification branch with spectral normalization
@@ -93,34 +139,36 @@ class DualBranchComplexDiscriminator(nn.Module):
         self.to(self.device)
         
     def _init_weights(self, m):
-        if isinstance(m, nn.Conv2d):
-            nn.init.normal_(m.weight, mean=0.0, std=0.02)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
+        # Fix for spectral normalized layers where direct weight access causes error
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+            # For spectral normalized modules, the weight might be inaccessible directly
+            try:
+                if hasattr(m, 'weight') and m.weight is not None:
+                    nn.init.normal_(m.weight, mean=0.0, std=0.02)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            except AttributeError:
+                # Skip if wrapped by spectral normalization
+                pass
         elif isinstance(m, nn.BatchNorm2d):
             nn.init.normal_(m.weight, 1.0, 0.02)
             nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.Linear):
-            nn.init.normal_(m.weight, 0.0, 0.02)
-            nn.init.constant_(m.bias, 0)
     
     def forward(self, x):
-        # Extract features up to 8x8 resolution
-        x = self.feature_extractor[0:9](x)  # Up to ndf*4 x 8 x 8
+        # Process in stages to correctly apply self-attention
         
-        # Apply self-attention
+        # First three convolutional blocks (1→ndf→ndf*2→ndf*4)
+        x = self.feature_extractor[0:8](x)  # Process up to ndf*4 x 8 x 8
+        
+        # Apply self-attention at the ndf*4 level
         x = self.attention(x)
         
-        # Continue feature extraction
-        features = self.feature_extractor[9:](x)  # From 8x8 to 4x4 with ndf*8 channels
+        # Final convolutional block (ndf*4→ndf*8)
+        features = self.feature_extractor[8:](x)
         
-        # Real/fake prediction
+        # Apply the three branches
         realfake_output = self.realfake_branch(features)
-        
-        # Expression classification
         expr_output = self.expr_branch(features)
-        
-        # Texture assessment
         texture_score = self.texture_module(features)
         
         return realfake_output, expr_output, texture_score 
