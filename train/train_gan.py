@@ -2,6 +2,7 @@ import os
 import argparse
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import torchvision.utils as vutils
 import matplotlib.pyplot as plt
@@ -123,7 +124,11 @@ def train_texPGAN(train_loader, epochs=100, lr=0.0002, beta1=0.5, beta2=0.999,
             fake_pred, fake_cls, tex_score_fake = discriminator(gen_images.detach())
             d_fake_loss = adversarial_loss(fake_pred, fake)
             
-            # Texture consistency loss
+            # Ensure fake and real texture scores have consistent dimensions
+            tex_score_fake = F.adaptive_avg_pool2d(tex_score_fake, (1, 1))
+            tex_score_real = F.adaptive_avg_pool2d(tex_score_real, (1, 1))
+
+            # Compute texture consistency loss
             d_tex_loss = torch.mean(torch.abs(tex_score_fake - tex_score_real))
             epoch_tex_loss += d_tex_loss.item()
             

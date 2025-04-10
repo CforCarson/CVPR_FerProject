@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class LBPDiscriminatorModule(nn.Module):
     """Texture assessment module using LBP-inspired convolutions"""
@@ -16,7 +17,7 @@ class LBPDiscriminatorModule(nn.Module):
         # Process with 1x1 convolution
         lbp_features = self.conv1x1(lbp_features)
         # Extract texture score
-        return self.project(self.pooling(lbp_features)).view(-1, 1)
+        return self.project(self.pooling(lbp_features))
 
 class DualBranchDiscriminator(nn.Module):
     """Discriminator with branches for real/fake detection and expression classification"""
@@ -87,5 +88,7 @@ class DualBranchDiscriminator(nn.Module):
         
         # Texture assessment
         texture_score = self.texture_module(features)
-        
+        if texture_score.dim() == 2:  # [B, 1]
+            texture_score = texture_score.unsqueeze(-1).unsqueeze(-1)
+        texture_score = F.adaptive_avg_pool2d(texture_score, (1, 1))
         return realfake_output, expr_output, texture_score

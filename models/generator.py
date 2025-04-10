@@ -168,4 +168,8 @@ class TextureEnhancedGenerator(nn.Module):
         x_textured = self.texture_module(x_transformed, c)
         
         # Decode to generate the final image
-        return self.decoder(x_textured)
+        generated_images = self.decoder(x_textured)
+
+    # Ensure output images are resized to match Discriminator input (e.g., 48x48)
+        generated_images = F.interpolate(generated_images, size=(48, 48), mode='bilinear', align_corners=False)
+        return generated_images
